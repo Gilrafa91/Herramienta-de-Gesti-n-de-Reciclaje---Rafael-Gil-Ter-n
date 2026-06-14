@@ -1,14 +1,14 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-from fpdf import FPDF
+import plotly.express as px
 import sqlite3
 
 st.set_page_config(page_title="Gestión de Reciclaje - Rafael Gil", layout="wide")
 
 st.title("♻️ Gestión de Reciclaje y Valorización")
 st.subheader("Rafael Gil Terán - Ingeniero en Recursos Naturales")
-st.caption("Sistema Profesional de Trazabilidad y Reportes")
+st.caption("Sistema Profesional")
 
 # Base de datos
 conn = sqlite3.connect('residuos.db')
@@ -46,26 +46,14 @@ with st.expander("📝 Registrar Nueva Entrada", expanded=True):
             conn.commit()
             st.success("✅ Registro guardado!")
 
-# Filtros
-st.header("🔎 Filtros")
-col_f1, col_f2 = st.columns(2)
-fecha_inicio = col_f1.date_input("Desde", datetime.today().replace(day=1))
-fecha_fin = col_f2.date_input("Hasta", datetime.today())
-
-df = pd.read_sql_query("SELECT * FROM residuos ORDER BY fecha DESC", conn)
-if not df.empty:
-    df['fecha'] = pd.to_datetime(df['fecha'])
-    df_filtrado = df[(df['fecha'] >= pd.to_datetime(fecha_inicio)) & (df['fecha'] <= pd.to_datetime(fecha_fin))]
-else:
-    df_filtrado = pd.DataFrame()
-
 # Dashboard
 st.header("📊 Dashboard General")
+df = pd.read_sql_query("SELECT * FROM residuos ORDER BY fecha DESC", conn)
 
-if not df_filtrado.empty:
-    total = df_filtrado['cantidad'].sum()
-    ganancia_total = df_filtrado['valor_ganancia'].sum()
-    reciclado = df_filtrado[df_filtrado['valorizacion'].isin(["Reciclaje", "Compost"])]['cantidad'].sum()
+if not df.empty:
+    total = df['cantidad'].sum()
+    ganancia_total = df['valor_ganancia'].sum()
+    reciclado = df[df['valorizacion'].isin(["Reciclaje", "Compost"])]['cantidad'].sum()
     porc = (reciclado / total * 100) if total > 0 else 0
 
     col1, col2, col3 = st.columns(3)
@@ -73,38 +61,16 @@ if not df_filtrado.empty:
     col2.metric("Valor Estimado", f"${ganancia_total:,.2f}")
     col3.metric("Tasa de Reciclaje", f"{porc:.1f}%")
 
+    fig = px.pie(df, names='valorizacion', values='cantidad', title="Reciclaje vs Disposición Final")
+    st.plotly_chart(fig, use_container_width=True)
+
     st.subheader("Valorización por Material")
-    resumen = df_filtrado.groupby('tipo').agg(
+    resumen = df.groupby('tipo').agg(
         Total=('cantidad', 'sum'),
-        Reciclado=('cantidad', lambda x: x[df_filtrado.loc[x.index, 'valorizacion'].isin(["Reciclaje","Compost"])].sum()),
+        Reciclado=('cantidad', lambda x: x[df.loc[x.index, 'valorizacion'].isin(["Reciclaje","Compost"])].sum()),
         Ganancia=('valor_ganancia', 'sum')
     ).reset_index()
     resumen['% Reciclaje'] = (resumen['Reciclado'] / resumen['Total'] * 100).round(1)
     st.dataframe(resumen, use_container_width=True)
-
-# Certificado
-st.header("🎖️ Certificado de Reciclaje")
-if not df_filtrado.empty:
-    idx = st.selectbox("Seleccionar registro", df_filtrado.index, 
-                      format_func=lambda x: f"{df_filtrado.loc[x,'fecha'].date()} - {df_filtrado.loc[x,'tipo']}")
-    if st.button("📜 Generar Certificado PDF", type="primary"):
-        row = df_filtrado.loc[idx]
-        pdf = FPDF()
-        pdf.add_page()
-        pdf.set_font("Arial", 'B', 18)
-        pdf.cell(0, 15, "CERTIFICADO DE RECICLAJE", ln=1, align='C')
-        pdf.set_font("Arial", size=12)
-        pdf.cell(0, 10, f"Certificado N° REC-{int(row['id']):04d}", ln=1, align='C')
-        pdf.ln(10)
-        pdf.cell(0, 8, f"Cliente: {row['origen']}", ln=1)
-        pdf.cell(0, 8, f"Material: {row['tipo']}", ln=1)
-        pdf.cell(0, 8, f"Cantidad: {row['cantidad']} {row['unidad']}", ln=1)
-        pdf.cell(0, 8, f"Valorización: {row['valorizacion']}", ln=1)
-        pdf.cell(0, 8, f"Valor: ${row['valor_ganancia']:,.2f}", ln=1)
-        pdf.ln(15)
-        pdf.cell(0, 10, "Rafael Gil Terán - Ingeniero en Recursos Naturales", ln=1, align='C')
-        pdf.output("certificado.pdf")
-        with open("certificado.pdf", "rb") as f:
-            st.download_button("⬇️ Descargar Certificado", f, file_name="Certificado_Reciclaje.pdf")
 
 st.caption("Herramienta Profesional - Rafael Gil Terán")
