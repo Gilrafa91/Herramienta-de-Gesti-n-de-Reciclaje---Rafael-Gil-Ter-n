@@ -1,7 +1,6 @@
 import streamlit as st
 import pandas as pd
 from datetime import datetime
-import plotly.express as px
 from fpdf import FPDF
 import sqlite3
 
@@ -9,7 +8,7 @@ st.set_page_config(page_title="Gestión de Reciclaje - Rafael Gil", layout="wide
 
 st.title("♻️ Gestión de Reciclaje y Valorización")
 st.subheader("Rafael Gil Terán - Ingeniero en Recursos Naturales")
-st.caption("Sistema Profesional de Trazabilidad, Valorización y Certificados")
+st.caption("Sistema Profesional de Trazabilidad y Reportes")
 
 # Base de datos
 conn = sqlite3.connect('residuos.db')
@@ -60,32 +59,20 @@ if not df.empty:
 else:
     df_filtrado = pd.DataFrame()
 
-# ==================== DASHBOARD ====================
+# Dashboard
 st.header("📊 Dashboard General")
 
 if not df_filtrado.empty:
     total = df_filtrado['cantidad'].sum()
     ganancia_total = df_filtrado['valor_ganancia'].sum()
     reciclado = df_filtrado[df_filtrado['valorizacion'].isin(["Reciclaje", "Compost"])]['cantidad'].sum()
-    porc_general = (reciclado / total * 100) if total > 0 else 0
+    porc = (reciclado / total * 100) if total > 0 else 0
 
     col1, col2, col3 = st.columns(3)
     col1.metric("Total Gestionado", f"{total:,.1f} ton")
     col2.metric("Valor Estimado", f"${ganancia_total:,.2f}")
-    col3.metric("Tasa de Reciclaje", f"{porc_general:.1f}%")
+    col3.metric("Tasa de Reciclaje", f"{porc:.1f}%")
 
-    # Gráfico Circular
-    fig_pie = px.pie(df_filtrado, names='valorizacion', values='cantidad', title="Reciclaje vs Disposición Final")
-    st.plotly_chart(fig_pie, use_container_width=True)
-
-    # Gráfico de Barras Mensual
-    st.subheader("📈 Cantidad por Mes")
-    df_filtrado['Mes'] = df_filtrado['fecha'].dt.strftime('%Y-%m')
-    mensual = df_filtrado.groupby('Mes')['cantidad'].sum().reset_index()
-    fig_bar = px.bar(mensual, x='Mes', y='cantidad', title="Cantidad Total por Mes", color='cantidad', color_continuous_scale='Blues')
-    st.plotly_chart(fig_bar, use_container_width=True)
-
-    # Por Material
     st.subheader("Valorización por Material")
     resumen = df_filtrado.groupby('tipo').agg(
         Total=('cantidad', 'sum'),
@@ -95,53 +82,29 @@ if not df_filtrado.empty:
     resumen['% Reciclaje'] = (resumen['Reciclado'] / resumen['Total'] * 100).round(1)
     st.dataframe(resumen, use_container_width=True)
 
-# ==================== CERTIFICADO PDF COMPLETO ====================
-st.header("🎖️ Certificados de Reciclaje")
-
+# Certificado
+st.header("🎖️ Certificado de Reciclaje")
 if not df_filtrado.empty:
-    registro = st.selectbox("Seleccionar registro para certificar", 
-                           options=df_filtrado.index,
-                           format_func=lambda x: f"{df_filtrado.loc[x,'fecha'].date()} | {df_filtrado.loc[x,'tipo']} - {df_filtrado.loc[x,'cantidad']} {df_filtrado.loc[x,'unidad']}")
-    
-    if st.button("📜 Generar Certificado PDF Completo", type="primary"):
-        row = df_filtrado.loc[registro]
-        
-        pdf = FPDF(orientation='P', unit='mm', format='A4')
+    idx = st.selectbox("Seleccionar registro", df_filtrado.index, 
+                      format_func=lambda x: f"{df_filtrado.loc[x,'fecha'].date()} - {df_filtrado.loc[x,'tipo']}")
+    if st.button("📜 Generar Certificado PDF", type="primary"):
+        row = df_filtrado.loc[idx]
+        pdf = FPDF()
         pdf.add_page()
-        
-        # Cabecera
-        pdf.set_font("Arial", 'B', 22)
-        pdf.cell(0, 20, "CERTIFICADO DE RECICLAJE", ln=1, align='C')
-        
+        pdf.set_font("Arial", 'B', 18)
+        pdf.cell(0, 15, "CERTIFICADO DE RECICLAJE", ln=1, align='C')
         pdf.set_font("Arial", size=12)
         pdf.cell(0, 10, f"Certificado N° REC-{int(row['id']):04d}", ln=1, align='C')
-        pdf.cell(0, 10, f"Fecha de Emisión: {datetime.today().strftime('%Y-%m-%d')}", ln=1, align='C')
         pdf.ln(10)
-        
-        # Datos
-        pdf.set_font("Arial", 'B', 14)
-        pdf.cell(0, 10, "Datos de la Operación", ln=1)
-        pdf.set_font("Arial", size=12)
-        pdf.cell(0, 8, f"Cliente / Origen: {row['origen']}", ln=1)
-        pdf.cell(0, 8, f"Material Reciclado: {row['tipo']}", ln=1)
+        pdf.cell(0, 8, f"Cliente: {row['origen']}", ln=1)
+        pdf.cell(0, 8, f"Material: {row['tipo']}", ln=1)
         pdf.cell(0, 8, f"Cantidad: {row['cantidad']} {row['unidad']}", ln=1)
-        pdf.cell(0, 8, f"Tipo de Valorización: {row['valorizacion']}", ln=1)
-        pdf.cell(0, 8, f"Valor Estimado: ${row['valor_ganancia']:,.2f}", ln=1)
+        pdf.cell(0, 8, f"Valorización: {row['valorizacion']}", ln=1)
+        pdf.cell(0, 8, f"Valor: ${row['valor_ganancia']:,.2f}", ln=1)
         pdf.ln(15)
-        
-        # Mensaje final
-        pdf.set_font("Arial", 'B', 12)
-        pdf.cell(0, 10, "Este documento certifica que el material ha sido gestionado", ln=1, align='C')
-        pdf.cell(0, 10, "responsablemente según principios de Economía Circular.", ln=1, align='C')
-        pdf.ln(10)
-        pdf.cell(0, 10, "Rafael Gil Terán", ln=1, align='C')
-        pdf.cell(0, 10, "Ingeniero en Recursos Naturales", ln=1, align='C')
-        
-        filename = f"Certificado_REC_{row['tipo']}_{datetime.today().strftime('%Y%m%d')}.pdf"
-        pdf.output(filename)
-        
-        with open(filename, "rb") as f:
-            st.download_button("⬇️ Descargar Certificado PDF", f, file_name=filename, mime="application/pdf")
-        st.success("✅ Certificado generado correctamente!")
+        pdf.cell(0, 10, "Rafael Gil Terán - Ingeniero en Recursos Naturales", ln=1, align='C')
+        pdf.output("certificado.pdf")
+        with open("certificado.pdf", "rb") as f:
+            st.download_button("⬇️ Descargar Certificado", f, file_name="Certificado_Reciclaje.pdf")
 
 st.caption("Herramienta Profesional - Rafael Gil Terán")
